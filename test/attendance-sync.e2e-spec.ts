@@ -71,6 +71,15 @@ describe('Attendance sync (e2e)', () => {
     expect(stored).toBe(2);
   });
 
+  it('accepts an in-range face confidence with model precision', async () => {
+    const user = await seedEmployee(harness.prisma, { email: 'sync-precision@example.com' });
+    const auth = await login(user.email, user.password);
+
+    await sync(auth.accessToken, [buildRecord({ faceMatchConfidence: 0.874391276543 })]).expect(
+      200,
+    );
+  });
+
   it('is idempotent: replaying the identical batch creates no duplicates', async () => {
     const user = await seedEmployee(harness.prisma, { email: 'sync2@example.com' });
     const auth = await login(user.email, user.password);

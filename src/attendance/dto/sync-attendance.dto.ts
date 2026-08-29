@@ -61,7 +61,10 @@ export class SyncAttendanceRecordDto {
 
   /** Cosine similarity from the on-device match, in [0, 1]. */
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 6 })
+  // Model scores commonly retain more than six decimal places. Prisma stores this as a
+  // DOUBLE PRECISION value, so do not reject an otherwise valid confidence solely because
+  // the device did not round it before syncing.
+  @IsNumber()
   @Min(0)
   @Max(1)
   faceMatchConfidence!: number;

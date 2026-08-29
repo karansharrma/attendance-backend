@@ -1,0 +1,119 @@
+// Mirrors the mobile app's Room database. Field names and semantics are deliberately
+// identical on both sides so the sync payload needs no translation layer.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AttendanceStatus {
+  VERIFIED
+  FLAGGED_OUTSIDE_GEOFENCE
+  UNRESTRICTED
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum Role {
+  EMPLOYEE
+  ADMIN
+}
+
+model Employee {
+  id           String  @id @default(uuid())
+  name         String
+  email        String  @unique
+  passwordHash String
+
+  /// True when this employee may punch in from anywhere, regardless of site assignments.
+  isUnrestricted Boolean @default(false)
+
+  /// Raw little-endian float32 vector, byte-identical to the BLOB the device caches in Room.
+  /// Never serialised into any response except the owning employee's own sync payload.
+  faceEmbedding Bytes?
+
+  /// Which model produced faceEmbedding. Embeddings from different models are not
+  /// comparable, so the device refuses to match across a version change.
+  embeddingModelVersion String?
+
+  role Role @default(EMPLOYEE)
+
+  sites             EmployeeSite[]
+  attendanceRecords AttendanceRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("employees")
+}
+
+model Site {
+  id           String @id @default(uuid())
+  name         String
+  latitude     Float
+  longitude    Float
+  radiusMeters Float
+
+  employees EmployeeSite[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sites")
+}
+
+model EmployeeSite {
+  employeeId String
+  siteId     String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([employeeId, siteId])
+  @@index([siteId])
+  @@map("employee_sites")
+}
+
+model AttendanceRecord {
+  /// Client-generated UUID. This is what makes /attendance/sync idempotent: the mobile sync
+  /// worker retries on network failure and must not create duplicates on partial success.
+  id String @id
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  timestamp DateTime
+  latitude  Float
+  longitude Float
+
+  matchedSiteId       String?
+  faceMatchConfidence Float
+
+  status         AttendanceStatus
+  isMockLocation Boolean
+
+  reviewedByAdminId String?
+  reviewedAt        DateTime?
+  reviewNote        String?
+  reviewStatus      ReviewStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // The admin dashboard filters almost exclusively on these three.
+  @@index([employeeId])
+  @@index([timestamp])
+  @@index([status])
+  @@index([reviewStatus])
+  @@index([employeeId, timestamp])
+  @@map("attendance_records")
+}

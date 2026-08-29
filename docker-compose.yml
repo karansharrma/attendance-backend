@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: attendance-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: attendance
+      POSTGRES_PASSWORD: attendance
+      POSTGRES_DB: attendance
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # The API waits on this, so it must test a real query, not just the port.
+      test: ["CMD-SHELL", "pg_isready -U attendance -d attendance"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: runtime
+    container_name: attendance-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Service name, not localhost: the API resolves postgres over the compose network.
+      DATABASE_URL: postgresql://attendance:attendance@postgres:5432/attendance?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      LATE_ARRIVAL_CUTOFF_MINUTES: ${LATE_ARRIVAL_CUTOFF_MINUTES:-555}
+      REPORTING_TIMEZONE: ${REPORTING_TIMEZONE:-UTC}
+      FACE_MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.75}
+      MAX_LOCATION_ACCURACY_METERS: ${MAX_LOCATION_ACCURACY_METERS:-30}
+      EMBEDDING_MODEL_VERSION: ${EMBEDDING_MODEL_VERSION:-mobilefacenet-v1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    ports:
+      - "3000:3000"
+    # Migrations run at container start rather than in the image build, so the same image
+    # can be promoted across environments without being rebuilt per database.
+    command: >
+      sh -c "npx prisma migrate deploy && node dist/main"
+
+volumes:
+  postgres-data:

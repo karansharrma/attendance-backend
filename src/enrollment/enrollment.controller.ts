@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Post,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -17,6 +18,7 @@ import { EnrollmentResult, EnrollmentService } from './enrollment.service';
 
 @Roles(Role.ADMIN)
 @Controller('enrollment')
+@SkipThrottle({ auth: true })
 export class EnrollmentController {
   constructor(private readonly enrollmentService: EnrollmentService) {}
 

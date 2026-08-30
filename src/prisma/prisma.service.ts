@@ -46,6 +46,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       throw new Error('truncateAll is only available when NODE_ENV=test');
     }
     await this.attendanceRecord.deleteMany();
+    await this.pushToken.deleteMany();
     await this.employeeSite.deleteMany();
     await this.site.deleteMany();
     await this.employee.deleteMany();

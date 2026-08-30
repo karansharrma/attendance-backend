@@ -1,10 +1,12 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AttendanceService } from './attendance.service';
 import { SyncAttendanceDto, SyncResponse } from './dto/sync-attendance.dto';
 
 @Controller('attendance')
+@SkipThrottle({ auth: true })
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 

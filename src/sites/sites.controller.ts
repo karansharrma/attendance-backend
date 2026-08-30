@@ -11,6 +11,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Role, Site } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { PaginatedResponse } from '../common/dto/pagination.dto';
@@ -25,6 +26,7 @@ import { SiteWithAssignmentCount, SitesService } from './sites.service';
  */
 @Roles(Role.ADMIN)
 @Controller('admin/sites')
+@SkipThrottle({ auth: true })
 export class SitesController {
   constructor(private readonly sitesService: SitesService) {}
 

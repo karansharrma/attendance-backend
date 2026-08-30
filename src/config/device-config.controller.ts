@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SkipThrottle } from '@nestjs/throttler';
 
 export interface DeviceConfig {
   faceMatchThreshold: number;
@@ -18,6 +19,7 @@ export interface DeviceConfig {
  * because a threshold is an attacker-useful hint about how the match gate is tuned.
  */
 @Controller('config')
+@SkipThrottle({ auth: true })
 export class DeviceConfigController {
   constructor(private readonly config: ConfigService) {}
 

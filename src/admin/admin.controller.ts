@@ -11,6 +11,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -27,6 +28,7 @@ import { ReviewAttendanceDto } from './dto/review-attendance.dto';
 /** Every route here is gated by the class-level @Roles(ADMIN) plus the global RolesGuard. */
 @Roles(Role.ADMIN)
 @Controller('admin')
+@SkipThrottle({ auth: true })
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,

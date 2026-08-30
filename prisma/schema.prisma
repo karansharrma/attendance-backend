@@ -16,6 +16,11 @@ enum AttendanceStatus {
   UNRESTRICTED
 }
 
+enum PunchType {
+  IN
+  OUT
+}
+
 enum ReviewStatus {
   PENDING
   APPROVED
@@ -46,13 +51,32 @@ model Employee {
 
   role Role @default(EMPLOYEE)
 
+  /// Per-admin preference. Punch-ins are always delivered; an admin may opt out of punch-outs.
+  punchOutNotificationsEnabled Boolean @default(true)
+
   sites             EmployeeSite[]
   attendanceRecords AttendanceRecord[]
+  pushTokens        PushToken[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("employees")
+}
+
+/// FCM registration tokens for the Android/iOS app and for web push. A user can use several
+/// devices; Firebase tokens rotate, so registering the same token updates its owner/platform.
+model PushToken {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([employeeId])
+  @@map("push_tokens")
 }
 
 model Site {
@@ -101,6 +125,15 @@ model AttendanceRecord {
   status         AttendanceStatus
   isMockLocation Boolean
 
+  /// Whether this is a punch-in or punch-out event
+  punchType PunchType @default(IN)
+
+  /// Reference to the paired punch record (null for unpaired records)
+  pairedPunchId String?
+
+  /// Calculated shift duration in minutes (only set for punch-out records)
+  shiftDurationMinutes Int?
+
   reviewedByAdminId String?
   reviewedAt        DateTime?
   reviewNote        String?
@@ -115,5 +148,7 @@ model AttendanceRecord {
   @@index([status])
   @@index([reviewStatus])
   @@index([employeeId, timestamp])
+  @@index([punchType])
+  @@index([pairedPunchId])
   @@map("attendance_records")
 }

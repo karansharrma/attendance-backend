@@ -1,7 +1,8 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { ReviewStatus } from '@prisma/client';
+import { PunchType, ReviewStatus } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   SyncAttendanceDto,
   SyncAttendanceRecordDto,
@@ -13,7 +14,10 @@ import {
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /**
    * Idempotent bulk sync.
@@ -56,6 +60,15 @@ export class AttendanceService {
     for (const record of deduped.values()) {
       try {
         const result = await this.upsertOne(user.sub, record, knownSiteIds);
+        if (result.outcome === 'created') {
+          // A push failure must never turn a successfully stored attendance event into a retry.
+          try {
+            await this.notifications.notifyAdminsOfAttendance(user.sub, record);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'unknown notification error';
+            this.logger.error(`Notification failed for attendance record ${record.id}: ${message}`);
+          }
+        }
         results.push(result);
         accepted += 1;
       } catch (error) {
@@ -98,6 +111,7 @@ export class AttendanceService {
       faceMatchConfidence: record.faceMatchConfidence,
       status: record.status,
       isMockLocation: record.isMockLocation,
+      punchType: record.punchType,
     };
 
     await this.prisma.attendanceRecord.upsert({
@@ -112,6 +126,11 @@ export class AttendanceService {
       // they belong to the admin, not the device.
       update: deviceOwnedFields,
     });
+
+    // Handle punch-in/punch-out pairing and shift calculation
+    if (record.punchType === PunchType.OUT && !existing) {
+      await this.pairWithPunchIn(employeeId, record.id, new Date(record.timestamp));
+    }
 
     const warnings: string[] = [];
     if (record.matchedSiteId && !knownSiteIds.has(record.matchedSiteId)) {
@@ -131,6 +150,54 @@ export class AttendanceService {
       outcome: existing ? 'updated' : 'created',
       ...(warnings.length > 0 ? { message: warnings.join('; ') } : {}),
     };
+  }
+
+  /**
+   * Pair a punch-out with the most recent unpaired punch-in and calculate shift duration.
+   */
+  private async pairWithPunchIn(
+    employeeId: string,
+    punchOutId: string,
+    punchOutTime: Date,
+  ): Promise<void> {
+    // Find the most recent unpaired punch-in for this employee
+    const recentPunchIn = await this.prisma.attendanceRecord.findFirst({
+      where: {
+        employeeId,
+        punchType: PunchType.IN,
+        pairedPunchId: null,
+        timestamp: { lt: punchOutTime },
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    if (recentPunchIn) {
+      // Calculate shift duration in minutes
+      const durationMs = punchOutTime.getTime() - recentPunchIn.timestamp.getTime();
+      const durationMinutes = Math.floor(durationMs / (1000 * 60));
+
+      // Update both records to establish the pairing
+      await this.prisma.attendanceRecord.updateMany({
+        where: { id: recentPunchIn.id },
+        data: { pairedPunchId: punchOutId },
+      });
+
+      await this.prisma.attendanceRecord.update({
+        where: { id: punchOutId },
+        data: {
+          pairedPunchId: recentPunchIn.id,
+          shiftDurationMinutes: durationMinutes,
+        },
+      });
+
+      this.logger.log(
+        `Paired punch-in ${recentPunchIn.id} with punch-out ${punchOutId} for employee ${employeeId}. Shift duration: ${durationMinutes} minutes`,
+      );
+    } else {
+      this.logger.warn(
+        `No unpaired punch-in found for punch-out ${punchOutId} for employee ${employeeId}`,
+      );
+    }
   }
 
   /** One query for the whole batch rather than one per record. */

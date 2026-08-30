@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import { IsEnum, IsISO8601, IsIn, IsOptional, IsUUID } from 'class-validator';
-import { AttendanceStatus, ReviewStatus } from '@prisma/client';
+import { AttendanceStatus, PunchType, ReviewStatus } from '@prisma/client';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 
 export class QueryAttendanceDto extends PaginationQueryDto {
@@ -11,6 +11,10 @@ export class QueryAttendanceDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(ReviewStatus)
   reviewStatus?: ReviewStatus;
+
+  @IsOptional()
+  @IsEnum(PunchType)
+  punchType?: PunchType;
 
   @IsOptional()
   @IsUUID('4')

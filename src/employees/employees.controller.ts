@@ -11,6 +11,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -22,6 +23,7 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { EmployeeSummary, EmployeeSyncPayload, EmployeesService } from './employees.service';
 
 @Controller('employees')
+@SkipThrottle({ auth: true })
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 

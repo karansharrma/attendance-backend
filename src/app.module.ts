@@ -15,6 +15,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { EnrollmentModule } from './enrollment/enrollment.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SitesModule } from './sites/sites.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -35,7 +36,8 @@ import { SitesModule } from './sites/sites.module';
           limit: config.get<number>('THROTTLE_GLOBAL_LIMIT', 120),
         },
         {
-          // Tighter bucket that /auth routes opt into with @Throttle({ auth: ... }).
+          // Tighter bucket for /auth routes. Other controllers explicitly skip it: named
+          // throttlers are evaluated globally by ThrottlerGuard unless skipped.
           name: 'auth',
           ttl: config.get<number>('THROTTLE_AUTH_TTL_SECONDS', 60) * 1000,
           limit: config.get<number>('THROTTLE_AUTH_LIMIT', 5),
@@ -44,6 +46,7 @@ import { SitesModule } from './sites/sites.module';
     }),
 
     PrismaModule,
+    NotificationsModule,
     AuthModule,
     EmployeesModule,
     SitesModule,

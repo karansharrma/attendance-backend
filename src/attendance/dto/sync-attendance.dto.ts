@@ -15,10 +15,10 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { AttendanceStatus } from '@prisma/client';
+import { AttendanceStatus, PunchType } from '@prisma/client';
 
 /**
- * One punch-in as the device recorded it.
+ * One attendance record (punch-in or punch-out) as the device recorded it.
  *
  * Field names mirror the Room entity exactly so the mobile sync worker can serialise its
  * local row with no translation step.
@@ -74,6 +74,10 @@ export class SyncAttendanceRecordDto {
 
   @IsBoolean()
   isMockLocation!: boolean;
+
+  /** Whether this is a punch-in or punch-out event */
+  @IsEnum(PunchType)
+  punchType!: PunchType;
 }
 
 export class SyncAttendanceDto {

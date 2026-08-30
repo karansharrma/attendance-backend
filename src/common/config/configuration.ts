@@ -110,6 +110,11 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   CORS_ORIGINS: string = '*';
+
+  /** JSON service-account credential from Firebase console. Leave unset to disable delivery. */
+  @IsOptional()
+  @IsString()
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
 }
 
 const NUMERIC_KEYS = new Set([

@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { ListSitesQueryDto } from './dto/list-sites.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface SiteWithAssignmentCount extends Site {
   assignedEmployeeCount: number;
@@ -14,7 +15,10 @@ export interface SiteWithAssignmentCount extends Site {
 export class SitesService {
   private readonly logger = new Logger(SitesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async list(query: ListSitesQueryDto): Promise<PaginatedResponse<SiteWithAssignmentCount>> {
     const where: Prisma.SiteWhereInput = query.search
@@ -94,11 +98,23 @@ export class SitesService {
   ): Promise<{ employeeId: string; siteId: string; assigned: true }> {
     await this.assertExists(siteId);
 
+    const existing = await this.prisma.employeeSite.findUnique({
+      where: { employeeId_siteId: { employeeId, siteId } },
+    });
     await this.prisma.employeeSite.upsert({
       where: { employeeId_siteId: { employeeId, siteId } },
       create: { employeeId, siteId },
       update: {},
     });
+
+    if (!existing) {
+      try {
+        await this.notifications.notifyEmployeeOfSiteAssignment(employeeId, siteId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown notification error';
+        this.logger.error(`Assignment notification failed for employee ${employeeId}: ${message}`);
+      }
+    }
 
     this.logger.log(`Assigned site ${siteId} to employee ${employeeId}`);
     return { employeeId, siteId, assigned: true };

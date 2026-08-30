@@ -464,6 +464,30 @@ Unauthenticated on purpose — container orchestrators cannot hold a JWT.
 - **Face embeddings** leave the server on exactly one route, for exactly one caller (the
   owner), and every release is logged.
 
+---
+
+## Firebase push notifications
+
+The API sends Firebase Cloud Messaging (FCM) notifications when an admin assigns a new site to
+an employee and when an employee creates a punch record. Every admin receives punch-ins; each
+admin can independently enable or disable their own punch-out alerts. FCM registration tokens
+are stored per account, so the same API supports Android/iOS and a browser dashboard.
+
+1. Create a Firebase service account in Firebase Console and put its one-line JSON credential in
+   `FIREBASE_SERVICE_ACCOUNT_JSON` (see `.env.example`). Do not commit that credential.
+2. After Firebase Messaging obtains or refreshes a token in either client, call
+   `POST /notifications/devices` with `{ "token": "...", "platform": "android" | "ios" | "web" }`
+   using that user's JWT. On sign-out or permission revocation call
+   `DELETE /notifications/devices/:token`.
+3. The admin app/dashboard can read and change its own punch-out setting using
+   `GET /notifications/preferences` and `PATCH /notifications/preferences` with
+   `{ "punchOutNotificationsEnabled": false }`.
+
+The mobile and web clients still need the normal Firebase Messaging client setup (including a
+web service worker) to request permission, obtain the FCM token, and display foreground messages.
+If Firebase credentials are absent or temporarily invalid, attendance and assignment operations
+continue normally; delivery is skipped and logged rather than failing the business operation.
+
 ### Refresh tokens are stateless
 
 Signed with their own secret and a `tokenType` claim, with no server-side record. This keeps

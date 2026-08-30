@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AttendanceStatus, Prisma, ReviewStatus } from '@prisma/client';
+import { AttendanceStatus, PunchType, Prisma, ReviewStatus } from '@prisma/client';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { PaginatedResponse, paginate } from '../common/dto/pagination.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +21,9 @@ export interface AttendanceRow {
   faceMatchConfidence: number;
   status: AttendanceStatus;
   isMockLocation: boolean;
+  punchType: PunchType;
+  pairedPunchId: string | null;
+  shiftDurationMinutes: number | null;
   reviewStatus: ReviewStatus;
   reviewedByAdminId: string | null;
   reviewedAt: Date | null;
@@ -39,11 +42,14 @@ export interface AnalyticsSummary {
   range: { from: string; to: string; timezone: string };
   totals: {
     punchIns: number;
+    punchOuts: number;
     activeEmployees: number;
     verified: number;
     flaggedOutsideGeofence: number;
     unrestricted: number;
     mockLocationAttempts: number;
+    totalShiftHours: number;
+    averageShiftMinutes: number;
   };
   review: { pending: number; approved: number; rejected: number };
   lateArrivals: { cutoffMinutesOfDay: number; cutoffLocalTime: string; count: number };
@@ -132,7 +138,7 @@ export class AdminService {
 
     const where: Prisma.AttendanceRecordWhereInput = { timestamp: { gte: from, lt: to } };
 
-    const [byStatus, byReview, mockCount, distinctEmployees, dailyTrend, lateCount] =
+    const [byStatus, byReview, byPunchType, mockCount, distinctEmployees, dailyTrend, lateCount, shiftStats] =
       await Promise.all([
         this.prisma.attendanceRecord.groupBy({ by: ['status'], where, _count: { _all: true } }),
         this.prisma.attendanceRecord.groupBy({
@@ -140,6 +146,7 @@ export class AdminService {
           where,
           _count: { _all: true },
         }),
+        this.prisma.attendanceRecord.groupBy({ by: ['punchType'], where, _count: { _all: true } }),
         this.prisma.attendanceRecord.count({ where: { ...where, isMockLocation: true } }),
         this.prisma.attendanceRecord.findMany({
           where,
@@ -148,22 +155,28 @@ export class AdminService {
         }),
         this.dailyTrend(from, to, timezone, cutoffMinutes),
         this.lateArrivalCount(from, to, timezone, cutoffMinutes),
+        this.shiftStatistics(where),
       ]);
 
     const statusCount = (status: AttendanceStatus): number =>
       byStatus.find((row) => row.status === status)?._count._all ?? 0;
     const reviewCount = (status: ReviewStatus): number =>
       byReview.find((row) => row.reviewStatus === status)?._count._all ?? 0;
+    const punchTypeCount = (type: PunchType): number =>
+      byPunchType.find((row) => row.punchType === type)?._count._all ?? 0;
 
     return {
       range: { from: from.toISOString(), to: to.toISOString(), timezone },
       totals: {
-        punchIns: byStatus.reduce((sum, row) => sum + row._count._all, 0),
+        punchIns: punchTypeCount(PunchType.IN),
+        punchOuts: punchTypeCount(PunchType.OUT),
         activeEmployees: distinctEmployees.length,
         verified: statusCount(AttendanceStatus.VERIFIED),
         flaggedOutsideGeofence: statusCount(AttendanceStatus.FLAGGED_OUTSIDE_GEOFENCE),
         unrestricted: statusCount(AttendanceStatus.UNRESTRICTED),
         mockLocationAttempts: mockCount,
+        totalShiftHours: shiftStats.totalHours,
+        averageShiftMinutes: shiftStats.averageMinutes,
       },
       review: {
         pending: reviewCount(ReviewStatus.PENDING),
@@ -193,6 +206,9 @@ export class AdminService {
       faceMatchConfidence: row.faceMatchConfidence,
       status: row.status,
       isMockLocation: row.isMockLocation,
+      punchType: row.punchType,
+      pairedPunchId: row.pairedPunchId,
+      shiftDurationMinutes: row.shiftDurationMinutes,
       reviewStatus: row.reviewStatus,
       reviewedByAdminId: row.reviewedByAdminId,
       reviewedAt: row.reviewedAt,
@@ -213,6 +229,7 @@ export class AdminService {
     return {
       ...(query.status ? { status: query.status } : {}),
       ...(query.reviewStatus ? { reviewStatus: query.reviewStatus } : {}),
+      ...(query.punchType ? { punchType: query.punchType } : {}),
       ...(query.employeeId ? { employeeId: query.employeeId } : {}),
       ...(timestamp.gte || timestamp.lt ? { timestamp } : {}),
     };
@@ -292,6 +309,29 @@ export class AdminService {
           > ${cutoffMinutes}
     `;
     return Number(rows[0]?.count ?? 0);
+  }
+
+  private async shiftStatistics(where: Prisma.AttendanceRecordWhereInput): Promise<{
+    totalHours: number;
+    averageMinutes: number;
+  }> {
+    const result = await this.prisma.attendanceRecord.aggregate({
+      where: {
+        ...where,
+        punchType: PunchType.OUT,
+        shiftDurationMinutes: { not: null },
+      },
+      _count: { _all: true },
+      _sum: { shiftDurationMinutes: true },
+    });
+
+    const totalMinutes = result._sum.shiftDurationMinutes ?? 0;
+    const count = result._count._all;
+
+    return {
+      totalHours: Number((totalMinutes / 60).toFixed(2)),
+      averageMinutes: count > 0 ? Math.round(totalMinutes / count) : 0,
+    };
   }
 }
 

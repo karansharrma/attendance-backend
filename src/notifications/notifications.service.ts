@@ -91,7 +91,9 @@ export class NotificationsService implements OnModuleInit {
     });
     if (!employee) return;
 
-    const isPunchOut = record.punchType === PunchType.OUT;
+    // Older app builds omit punchType; those records are stored as IN.
+    const punchType = record.punchType ?? PunchType.IN;
+    const isPunchOut = punchType === PunchType.OUT;
     const admins = await this.prisma.employee.findMany({
       where: {
         role: Role.ADMIN,
@@ -109,7 +111,7 @@ export class NotificationsService implements OnModuleInit {
             event: isPunchOut ? 'attendance_punch_out' : 'attendance_punch_in',
             attendanceId: record.id,
             employeeId,
-            punchType: record.punchType,
+            punchType,
             timestamp: record.timestamp,
           },
         }),

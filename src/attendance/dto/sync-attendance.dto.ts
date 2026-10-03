@@ -43,13 +43,21 @@ export class SyncAttendanceRecordDto {
   @IsISO8601({ strict: true }, { message: 'timestamp must be an ISO-8601 datetime' })
   timestamp!: string;
 
+  /**
+   * Null or absent when the device had no GPS fix (unrestricted employees). Validated as a
+   * latitude/longitude only when present. Supply both or neither; a record with exactly one
+   * is rejected per-record by the service. A record without coordinates is never stored as
+   * VERIFIED -- see AttendanceService.
+   */
+  @IsOptional()
   @Type(() => Number)
   @IsLatitude()
-  latitude!: number;
+  latitude?: number | null;
 
+  @IsOptional()
   @Type(() => Number)
   @IsLongitude()
-  longitude!: number;
+  longitude?: number | null;
 
   /**
    * The geofence the device matched, if any. Intentionally not a foreign key: a record must
@@ -75,9 +83,18 @@ export class SyncAttendanceRecordDto {
   @IsBoolean()
   isMockLocation!: boolean;
 
-  /** Whether this is a punch-in or punch-out event */
+  /**
+   * Whether this is a punch-in or punch-out event.
+   *
+   * Optional for backward compatibility: app builds released before punch-out support do not
+   * send it, and with `forbidNonWhitelisted` a required field turned every one of their syncs
+   * into a 400 that the sync worker treats as permanent. Absent means IN when the record is
+   * first created; on a re-sync of an existing id an absent value leaves the stored punch
+   * type untouched.
+   */
+  @IsOptional()
   @IsEnum(PunchType)
-  punchType!: PunchType;
+  punchType?: PunchType;
 }
 
 export class SyncAttendanceDto {

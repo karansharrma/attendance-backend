@@ -80,7 +80,7 @@ model PushToken {
 }
 
 model Site {
-  id           String @id @default(uuid())
+  id           String  @id @default(uuid())
   name         String
   latitude     Float
   longitude    Float
@@ -116,8 +116,11 @@ model AttendanceRecord {
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   timestamp DateTime
-  latitude  Float
-  longitude Float
+
+  /// Null when the device had no GPS fix (unrestricted employees may punch without one).
+  /// Both null or both present. A record without coordinates is never stored as VERIFIED.
+  latitude  Float?
+  longitude Float?
 
   matchedSiteId       String?
   faceMatchConfidence Float

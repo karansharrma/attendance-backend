@@ -14,8 +14,9 @@ export interface AttendanceRow {
   employeeName: string;
   employeeEmail: string;
   timestamp: Date;
-  latitude: number;
-  longitude: number;
+  /** Null when the device had no GPS fix. */
+  latitude: number | null;
+  longitude: number | null;
   matchedSiteId: string | null;
   matchedSiteName: string | null;
   faceMatchConfidence: number;

@@ -1,5 +1,7 @@
 # Attendance Backend
 
+> **Project overview:** see [PROJECT_STATUS.md](https://github.com/karansharrma/attendance-android/blob/main/PROJECT_STATUS.md) in the Android repo for the whole system (Android app, backend, admin panel), current status, and roadmap.
+
 NestJS + Prisma + PostgreSQL API for a face-recognition and geofenced attendance system.
 
 Face matching and the GPS geofence check both happen **on the device**, offline. This service
@@ -109,6 +111,21 @@ Regenerate the client after editing the schema:
 ```bash
 npx prisma generate
 ```
+
+### Deploying this change (nullable coordinates, optional `punchType`, `GET /attendance/me`)
+
+Migration `prisma/migrations/20261003000000_nullable_attendance_coordinates/` drops `NOT NULL`
+from `attendance_records.latitude` / `longitude` (the `sites` table is unchanged). It is
+additive and safe to run against the currently deployed code.
+
+1. Apply it with `npx prisma migrate deploy` against the production database.
+2. Deploy this backend build. The optional `punchType` fix (which unblocks the Android build
+   currently in users' hands, whose syncs otherwise all fail with `400`) works with or
+   without the migration, but a record with `null` coordinates fails at the database until
+   the migration is applied.
+3. **Only then** ship the updated Android app that sends `punchType` and `null` coordinates.
+   The migration must be applied with `prisma migrate deploy` **before** that app ships;
+   otherwise every no-GPS punch comes back as a per-record `rejected`.
 
 ---
 
@@ -284,11 +301,47 @@ The device pushes its offline queue. **Idempotent by design.**
       "matchedSiteId": "1111...",
       "faceMatchConfidence": 0.874,
       "status": "VERIFIED",
-      "isMockLocation": false
+      "isMockLocation": false,
+      "punchType": "IN"
+    },
+    {
+      "id": "5b7e2c90-1d3f-4e8a-9b6c-2f4a1d0e9c87",
+      "timestamp": "2026-08-26T12:05:00.000Z",
+      "latitude": null,
+      "longitude": null,
+      "matchedSiteId": null,
+      "faceMatchConfidence": 0.91,
+      "status": "UNRESTRICTED",
+      "isMockLocation": false,
+      "punchType": "OUT"
     }
   ]
 }
 ```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID v4 string | Required. Client-generated idempotency key. |
+| `employeeId` | UUID v4 string | Optional, advisory (see below). |
+| `timestamp` | ISO-8601 string | Required. |
+| `latitude` / `longitude` | number \| `null` | **Optional / nullable.** `null` or absent when the device had no GPS fix (unrestricted employees). Range-checked when present. Send both or neither — exactly one is a per-record `rejected`. |
+| `matchedSiteId` | UUID v4 string \| `null` | Optional. |
+| `faceMatchConfidence` | number in [0, 1] | Required. |
+| `status` | `VERIFIED` \| `FLAGGED_OUTSIDE_GEOFENCE` \| `UNRESTRICTED` | Required. |
+| `isMockLocation` | boolean | Required. |
+| `punchType` | `IN` \| `OUT` | **Optional, defaults to `IN`.** App builds released before punch-out support do not send it. On a re-sync of an existing id, an absent `punchType` leaves the stored value unchanged. |
+
+**Records without coordinates.** The server otherwise trusts the device's geofence verdict, but
+a record with no coordinates cannot have been checked against a geofence. Such a record is
+stored (rejecting it would lose a face-verified event for good) but is downgraded to
+`FLAGGED_OUTSIDE_GEOFENCE`, with an explanatory `message` in its result, when it claims
+`VERIFIED`, or when it claims `UNRESTRICTED` for an employee who is neither `isUnrestricted`
+nor without assigned sites. It then shows up in the admin review queue.
+
+**Punch-out pairing.** An `OUT` record is paired with the employee's most recent unpaired `IN`
+before it; both get `pairedPunchId` and the `OUT` gets `shiftDurationMinutes`. An `OUT` with
+no earlier unpaired `IN` is still stored, just unpaired. Pairing is retried on a re-sync of an
+`OUT` that is still unpaired, and a re-sync never changes an existing pairing.
 
 ```json
 {
@@ -321,9 +374,48 @@ Four properties the mobile sync worker depends on:
 An id repeated inside one batch collapses to a single upsert, so the request is idempotent
 with itself as well as with earlier requests.
 
+### `GET /attendance/me` — any authenticated user, paginated
+
+The caller's own records, newest first (`timestamp desc`, then `id desc`). Always scoped to the
+employee in the access token; there is no `employeeId` parameter. The Android app uses it to
+restore history after a reinstall.
+
+`?from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z&page=1&limit=50` — all optional. `from`
+is inclusive, `to` exclusive (ISO-8601); `from >= to` is a `400`. `limit` is capped at 200.
+
+```json
+{
+  "data": [
+    {
+      "id": "5b7e2c90-1d3f-4e8a-9b6c-2f4a1d0e9c87",
+      "employeeId": "9c2b...",
+      "timestamp": "2026-08-26T12:05:00.000Z",
+      "latitude": null,
+      "longitude": null,
+      "matchedSiteId": null,
+      "matchedSiteName": null,
+      "faceMatchConfidence": 0.91,
+      "status": "UNRESTRICTED",
+      "isMockLocation": false,
+      "punchType": "OUT",
+      "pairedPunchId": "0f3d5a1e-9c44-4a0b-8e51-6c9f0c1a2b3d",
+      "shiftDurationMinutes": 503,
+      "reviewStatus": "PENDING",
+      "reviewedAt": null,
+      "reviewNote": null,
+      "createdAt": "2026-08-26T12:05:03.120Z"
+    }
+  ],
+  "meta": { "total": 1, "page": 1, "limit": 50, "totalPages": 1, "hasNextPage": false }
+}
+```
+
+`matchedSiteName` is `null` when there is no matched site or it has since been deleted. The
+reviewing admin's id is not exposed to employees.
+
 ### `GET /admin/attendance` — admin, paginated
 
-`?status=FLAGGED_OUTSIDE_GEOFENCE&reviewStatus=PENDING&employeeId=...&dateFrom=2026-08-01T00:00:00Z&dateTo=2026-09-01T00:00:00Z&page=1&limit=50&sortBy=timestamp&sortOrder=desc`
+`?status=FLAGGED_OUTSIDE_GEOFENCE&reviewStatus=PENDING&punchType=OUT&employeeId=...&dateFrom=2026-08-01T00:00:00Z&dateTo=2026-09-01T00:00:00Z&page=1&limit=50&sortBy=timestamp&sortOrder=desc`
 
 ```json
 {
@@ -341,6 +433,9 @@ with itself as well as with earlier requests.
       "faceMatchConfidence": 0.874,
       "status": "VERIFIED",
       "isMockLocation": false,
+      "punchType": "IN",
+      "pairedPunchId": "5b7e2c90-1d3f-4e8a-9b6c-2f4a1d0e9c87",
+      "shiftDurationMinutes": null,
       "reviewStatus": "APPROVED",
       "reviewedByAdminId": "3f1c...",
       "reviewedAt": "2026-08-26T09:30:00.000Z",
@@ -352,8 +447,10 @@ with itself as well as with earlier requests.
 }
 ```
 
-`dateFrom` is inclusive, `dateTo` exclusive. `matchedSiteName` is `null` when the site has
-since been deleted — see the note on `matchedSiteId` below.
+`dateFrom` is inclusive, `dateTo` exclusive. `punchType` (`IN` | `OUT`) filters by punch
+type. `latitude`/`longitude` are `null` for records captured without a GPS fix.
+`shiftDurationMinutes` is set only on paired `OUT` records. `matchedSiteName` is `null` when
+the site has since been deleted — see the note on `matchedSiteId` below.
 
 ### `PATCH /admin/attendance/:id/review` — admin
 
@@ -520,6 +617,17 @@ Beyond the models in the spec, the only additions are `updatedAt` timestamps, `r
 ## Tests
 
 ```bash
+npx jest
+```
+
+Unit tests (`src/**/*.spec.ts`) use a mocked `PrismaService` and need no database:
+`src/attendance/attendance.service.spec.ts` covers sync (punchType defaulting, OUT/IN pairing
+and shift duration, idempotent re-sync, null coordinates and the geofence downgrade,
+cross-employee rejection) and `GET /attendance/me`; `src/attendance/dto/sync-attendance.dto.spec.ts`
+proves a legacy payload (no `punchType`, null coordinates) passes validation with the same
+`whitelist` / `forbidNonWhitelisted` options as production.
+
+```bash
 npm run test:e2e
 ```
 
@@ -561,7 +669,7 @@ src/
  ├── auth/         login, refresh, JWT strategies, guards, roles + public decorators
  ├── employees/    CRUD plus the device sync payload (and its embedding scoping)
  ├── sites/        geofenced site CRUD and employee assignment
- ├── attendance/   the idempotent sync endpoint
+ ├── attendance/   the idempotent sync endpoint and the employee self-history (/attendance/me)
  ├── enrollment/   admin face-template upload and revocation
  ├── admin/        attendance query, review, analytics
  ├── config/       device config + health

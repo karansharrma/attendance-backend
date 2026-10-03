@@ -1,8 +1,10 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { AttendanceService } from './attendance.service';
+import { PaginatedResponse } from '../common/dto/pagination.dto';
+import { AttendanceService, MyAttendanceRow } from './attendance.service';
+import { MyAttendanceQueryDto } from './dto/my-attendance-query.dto';
 import { SyncAttendanceDto, SyncResponse } from './dto/sync-attendance.dto';
 
 @Controller('attendance')
@@ -21,5 +23,18 @@ export class AttendanceController {
     @Body() dto: SyncAttendanceDto,
   ): Promise<SyncResponse> {
     return this.attendanceService.sync(user, dto);
+  }
+
+  /**
+   * The caller's own attendance history, newest first. Any authenticated role; always scoped
+   * to the employee in the access token. The device uses it to restore history after a
+   * reinstall.
+   */
+  @Get('me')
+  myAttendance(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: MyAttendanceQueryDto,
+  ): Promise<PaginatedResponse<MyAttendanceRow>> {
+    return this.attendanceService.findMine(user, query);
   }
 }
